@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="menumag-pagina" content="1.0">
+<meta name="robots" content="noindex">
+<title>Menu</title>
+<style>
+html,body{margin:0;background:#fff}
+#m{max-width:720px;margin:0 auto;min-height:100vh}
+</style>
+</head>
+<body>
+<div id="m"></div>
+<script>
+/* ==COMUNE== QR, SHA-1 e disegno del menu: questo blocco è IDENTICO nell'app e nella pagina del menu (lo copia costruisci.py da Sorgente/comune.js) */
+var PM=(function(){
+  /* --- SHA-1 e HMAC su array di byte (senza crypto.subtle: funziona anche su http e sui WebView vecchi) --- */
+  function sha1(msg){
+    var h0=0x67452301,h1=0xEFCDAB89,h2=0x98BADCFE,h3=0x10325476,h4=0xC3D2E1F0,i,j,ml=msg.length,m=msg.slice();
+    m.push(0x80);while(m.length%64!==56)m.push(0);
+    var hi=Math.floor(ml/0x20000000),lo=(ml<<3)>>>0;
+    m.push((hi>>>24)&255,(hi>>>16)&255,(hi>>>8)&255,hi&255,(lo>>>24)&255,(lo>>>16)&255,(lo>>>8)&255,lo&255);
+    var w=new Array(80);
+    for(i=0;i<m.length;i+=64){
+      for(j=0;j<16;j++)w[j]=((m[i+4*j]<<24)|(m[i+4*j+1]<<16)|(m[i+4*j+2]<<8)|m[i+4*j+3])>>>0;
+      for(j=16;j<80;j++){var x=w[j-3]^w[j-8]^w[j-14]^w[j-16];w[j]=((x<<1)|(x>>>31))>>>0;}
+      var a=h0,b=h1,c=h2,d=h3,e=h4,f,k,t;
+      for(j=0;j<80;j++){
+        if(j<20){f=(b&c)|((~b)&d);k=0x5A827999;}else if(j<40){f=b^c^d;k=0x6ED9EBA1;}else if(j<60){f=(b&c)|(b&d)|(c&d);k=0x8F1BBCDC;}else{f=b^c^d;k=0xCA62C1D6;}
+        t=(((a<<5)|(a>>>27))+f+e+k+w[j])>>>0;e=d;d=c;c=((b<<30)|(b>>>2))>>>0;b=a;a=t;
+      }
+      h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;h4=(h4+e)>>>0;
+    }
+    var out=[];[h0,h1,h2,h3,h4].forEach(function(h){out.push((h>>>24)&255,(h>>>16)&255,(h>>>8)&255,h&255);});
+    return out;
+  }
+  function bytes(s){var o=[];for(var i=0;i<s.length;i++)o.push(s.charCodeAt(i)&255);return o;}
+  function hmac(key,msg){
+    if(key.length>64)key=sha1(key);
+    var ip=[],op=[],i;for(i=0;i<64;i++){var k=key[i]||0;ip.push(k^0x36);op.push(k^0x5c);}
+    return sha1(op.concat(sha1(ip.concat(msg))));
+  }
+  function hex(a){return a.map(function(b){return (b<16?"0":"")+b.toString(16);}).join("");}
+  /* --- codice a 6 cifre (HOTP, RFC 4226): segreto = stringa di cifre, contatore = periodo di 30 secondi --- */
+  var PASSO=30;
+  function contatore(ms){return Math.floor((ms==null?Date.now():ms)/1000/PASSO);}
+  function codice(segreto,cont){
+    var c=[0,0,0,0,0,0,0,0],n=cont,i;for(i=7;i>=0;i--){c[i]=n%256;n=Math.floor(n/256);}
+    var h=hmac(bytes(String(segreto)),c),o=h[19]&15;
+    var v=((h[o]&127)*16777216)+(h[o+1]<<16)+(h[o+2]<<8)+h[o+3];
+    var s=String(v%1000000);while(s.length<6)s="0"+s;return s;
+  }
+  function cifre(n){var a=new Uint8Array(n),s="",i;
+    if(typeof crypto!=="undefined"&&crypto.getRandomValues){
+      /* scarto i valori sopra 249 così ogni cifra ha la stessa probabilità */
+      while(s.length<n){crypto.getRandomValues(a);for(i=0;i<n&&s.length<n;i++)if(a[i]<250)s+=String(a[i]%10);}
+    }else for(i=0;i<n;i++)s+=String(Math.floor(Math.random()*10));
+    return s;}
+
+  /* --- QR (versioni 1-5, un solo blocco; livello L oppure M fino alla versione 3; dati a byte) --- */
+  var CAP={L:[19,34,55,80,108],M:[16,28,44]},ECN={L:[7,10,15,20,26],M:[10,16,26]};
+  var EXP=[],LOG=[];(function(){var x=1,i;for(i=0;i<255;i++){EXP[i]=x;LOG[x]=i;x<<=1;if(x&256)x^=0x11d;}for(i=255;i<512;i++)EXP[i]=EXP[i-255];})();
+  function gmul(a,b){return a&&b?EXP[LOG[a]+LOG[b]]:0;}
+  function rs(data,n){
+    var g=[1],i,j;for(i=0;i<n;i++){var ng=new Array(g.length+1);for(j=0;j<ng.length;j++)ng[j]=0;
+      for(j=0;j<g.length;j++){ng[j]^=g[j];ng[j+1]^=gmul(g[j],EXP[i]);}g=ng;}
+    var r=[];for(i=0;i<n;i++)r.push(0);
+    for(i=0;i<data.length;i++){var f=data[i]^r[0];r.shift();r.push(0);for(j=0;j<n;j++)r[j]^=gmul(g[j+1],f);}
+    return r;
+  }
+  function qr(testo,liv){
+    liv=liv==="M"?"M":"L";
+    var d=bytes(unescape(encodeURIComponent(String(testo)))),v=-1,i,j,k;
+    for(i=0;i<CAP[liv].length;i++)if(d.length+2<=CAP[liv][i]){v=i;break;}
+    if(v<0){if(liv==="M")return qr(testo,"L");return null;}
+    var nd=CAP[liv][v],ne=ECN[liv][v],bits=[];
+    function put(val,len){for(var q=len-1;q>=0;q--)bits.push((val>>>q)&1);}
+    put(4,4);put(d.length,8);for(i=0;i<d.length;i++)put(d[i],8);
+    for(i=0;i<4&&bits.length<nd*8;i++)bits.push(0);
+    while(bits.length%8)bits.push(0);
+    var cw=[];for(i=0;i<bits.length;i+=8){var b=0;for(j=0;j<8;j++)b=(b<<1)|bits[i+j];cw.push(b);}
+    for(i=0;cw.length<nd;i++)cw.push(i%2?0x11:0xEC);
+    var tutti=cw.concat(rs(cw,ne)),n=17+4*(v+1),m=[],fn=[];
+    for(i=0;i<n;i++){m.push([]);fn.push([]);for(j=0;j<n;j++){m[i].push(0);fn[i].push(0);}}
+    function set(r,c,val){if(r<0||c<0||r>=n||c>=n)return;m[r][c]=val?1:0;fn[r][c]=1;}
+    function finder(r0,c0){for(var r=-1;r<=7;r++)for(var c=-1;c<=7;c++){var on=r>=0&&r<=6&&c>=0&&c<=6&&(r===0||r===6||c===0||c===6||(r>=2&&r<=4&&c>=2&&c<=4));set(r0+r,c0+c,on);}}
+    finder(0,0);finder(0,n-7);finder(n-7,0);
+    for(i=8;i<n-8;i++){set(6,i,i%2===0);set(i,6,i%2===0);}
+    if(v>=1){var a=n-7;for(i=-2;i<=2;i++)for(j=-2;j<=2;j++)set(a+i,a+j,Math.max(Math.abs(i),Math.abs(j))!==1);}
+    /* zone delle informazioni di formato: prenotate adesso, scritte dopo la scelta della maschera */
+    for(i=0;i<9;i++){if(!fn[8][i])set(8,i,0);if(!fn[i][8])set(i,8,0);}
+    for(i=0;i<8;i++){set(8,n-1-i,0);set(n-1-i,8,0);}
+    set(n-8,8,1);
+    var pos=[],su=true;
+    for(var col=n-1;col>0;col-=2){if(col===6)col--;
+      for(k=0;k<n;k++){var r=su?n-1-k:k;for(j=0;j<2;j++){var c=col-j;if(!fn[r][c])pos.push([r,c]);}}
+      su=!su;}
+    var db=[];for(i=0;i<tutti.length;i++)for(j=7;j>=0;j--)db.push((tutti[i]>>>j)&1);
+    for(i=0;i<pos.length;i++)m[pos[i][0]][pos[i][1]]=i<db.length?db[i]:0;
+    function mask(t,r,c){switch(t){case 0:return (r+c)%2===0;case 1:return r%2===0;case 2:return c%3===0;case 3:return (r+c)%3===0;
+      case 4:return (Math.floor(r/2)+Math.floor(c/3))%2===0;case 5:return (r*c)%2+(r*c)%3===0;case 6:return ((r*c)%2+(r*c)%3)%2===0;default:return ((r+c)%2+(r*c)%3)%2===0;}}
+    function formato(g,t){
+      var dati=((liv==="L"?1:0)<<3)|t,rem=dati;for(var q=0;q<10;q++)rem=(rem<<1)^((rem>>>9)*0x537);
+      var f=((dati<<10)|rem)^0x5412;function bit(x){return (f>>>x)&1;}
+      for(q=0;q<=5;q++)g[q][8]=bit(q);g[7][8]=bit(6);g[8][8]=bit(7);g[8][7]=bit(8);for(q=9;q<15;q++)g[8][14-q]=bit(q);
+      for(q=0;q<8;q++)g[8][n-1-q]=bit(q);for(q=8;q<15;q++)g[n-15+q][8]=bit(q);
+    }
+    function costruisci(t){var g=m.map(function(x){return x.slice();});
+      for(var q=0;q<pos.length;q++){var r=pos[q][0],c=pos[q][1];if(mask(t,r,c))g[r][c]^=1;}
+      formato(g,t);return g;}
+    function penale(g){var p=0,r,c,run,scuri=0;
+      for(r=0;r<n;r++){run=1;for(c=1;c<n;c++){if(g[r][c]===g[r][c-1]){run++;if(run===5)p+=3;else if(run>5)p++;}else run=1;}}
+      for(c=0;c<n;c++){run=1;for(r=1;r<n;r++){if(g[r][c]===g[r-1][c]){run++;if(run===5)p+=3;else if(run>5)p++;}else run=1;}}
+      for(r=0;r<n-1;r++)for(c=0;c<n-1;c++){var x=g[r][c];if(x===g[r][c+1]&&x===g[r+1][c]&&x===g[r+1][c+1])p+=3;}
+      for(r=0;r<n;r++)for(c=0;c<n;c++)scuri+=g[r][c];
+      p+=Math.floor(Math.abs(scuri*20-n*n*10)/(n*n))*10;return p;}
+    var best=null,bp=1e9;for(i=0;i<8;i++){var g=costruisci(i),pp=penale(g);if(pp<bp){bp=pp;best=g;}}
+    return best;
+  }
+  /** disegna il QR come SVG nero su bianco con il bordo chiaro di 4 moduli (serve ai lettori) */
+  function qrSvg(testo,liv,px){
+    var g=qr(testo,liv);if(!g)return "";var n=g.length,t=n+8,p="",r,c;
+    for(r=0;r<n;r++)for(c=0;c<n;c++)if(g[r][c])p+="M"+(c+4)+" "+(r+4)+"h1v1h-1z";
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+t+' '+t+'" width="'+(px||240)+'" height="'+(px||240)+'" shape-rendering="crispEdges"><rect width="'+t+'" height="'+t+'" fill="#fff"/><path d="'+p+'" fill="#000"/></svg>';
+  }
+  return {sha1:sha1,hmac:hmac,hex:hex,bytes:bytes,PASSO:PASSO,contatore:contatore,codice:codice,cifre:cifre,qr:qr,qrSvg:qrSvg};
+})();
+/* --- MM: disegna il menu. Lo usano la pagina pubblica (pagina/index.html) e l'anteprima dentro l'app: così sono sempre uguali --- */
+var MM=(function(){
+  function e(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+  /** testo nella lingua scelta; se manca la traduzione esce l'italiano */
+  function tx(o,l){if(o==null)return "";if(typeof o==="string")return o;return o[l]||o.it||"";}
+  /** "5,50" -> "€ 5,50"; un testo qualsiasi (es. "in base al gusto") resta com'è */
+  function prezzo(v){v=String(v==null?"":v).trim();if(!v)return "";return /^\d+([.,]\d{1,2})?$/.test(v)?"€ "+v.replace(".",","):v;}
+  function colore(c,def){return /^#[0-9a-fA-F]{6}$/.test(String(c||""))?c:def;}
+  function oggi(){var d=new Date();function p(n){return (n<10?"0":"")+n;}return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());}
+  /** il menu non si legge più dal giorno dopo la scadenza della licenza (scad = ultimo giorno valido) */
+  function scaduto(m){return !!(m&&m.scad&&oggi()>m.scad);}
+  function lingue(m){return m&&m.lingue&&m.lingue.length?m.lingue:["it"];}
+  /** telefono in italiano -> italiano; qualsiasi altra lingua -> inglese, se il menu ce l'ha */
+  function linguaIniziale(m){var ls=lingue(m),n="it";try{n=String(navigator.language||navigator.userLanguage||"it").slice(0,2).toLowerCase();}catch(x){}
+    if(ls.indexOf(n)>=0)return n;return ls.indexOf("en")>=0?"en":ls[0];}
+  var T={it:{esaur:"Esaurito",nd:"Menu momentaneamente non disponibile",prep:"Menu in preparazione",avanti:"Avanti",tutti:"Tutti i settori"},
+         en:{esaur:"Sold out",nd:"Menu temporarily unavailable",prep:"Menu coming soon",avanti:"Next",tutti:"All sections"}};
+  var CSS=".mm{font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#2a2622;background:#fff;font-size:16px;line-height:1.35;min-height:100%;text-align:left}"+
+    ".mm *{box-sizing:border-box}"+
+    ".mm-top{background:var(--c1);display:flex;align-items:center;padding:12px 14px}"+
+    ".mm-logo{width:58px;height:58px;border-radius:50%;object-fit:cover;margin-right:12px;flex:none;background:#fff}"+
+    ".mm-nome{flex:1;min-width:0}.mm-nome b{display:block;font-size:24px;line-height:1.1;color:var(--c2);font-weight:800}.mm-nome span{display:block;font-size:14px;color:var(--c2);opacity:.85;margin-top:2px}"+
+    ".mm-lang{flex:none;margin-left:10px;white-space:nowrap}.mm-lang button{font:inherit;font-size:14px;font-weight:700;border:2px solid var(--c2);background:transparent;color:var(--c2);padding:6px 10px;margin-left:-2px;cursor:pointer}"+
+    ".mm-lang button:first-child{border-radius:6px 0 0 6px;margin-left:0}.mm-lang button:last-child{border-radius:0 6px 6px 0}.mm-lang button.on{background:var(--c2);color:#fff}"+
+    ".mm-nav{position:-webkit-sticky;position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #e8e3da;display:flex;flex-wrap:wrap;padding:8px 5px 2px}"+
+    ".mm-nav button{flex:1 1 auto;font:inherit;font-size:14px;font-weight:700;border:0;background:#f3efe7;color:#4a443c;padding:8px 10px;border-radius:18px;margin:0 3px 6px;cursor:pointer;white-space:nowrap}"+
+    ".mm-nav button.on{background:var(--c2);color:#fff}"+
+    ".mm-msg{margin:18px 0 6px;border:2px solid var(--c2);border-radius:12px;overflow:hidden;background:#fffbea}.mm-msg img{display:block;width:100%;max-height:200px;object-fit:cover}"+
+    ".mm-msg div{padding:12px 14px}.mm-msg b{display:block;font-size:20px;font-weight:800;color:var(--c2);line-height:1.15}.mm-msg span{display:block;margin-top:4px;color:#4a443c;white-space:pre-line}"+
+    ".mm-av{padding:14px 14px 0}.mm-av button{display:block;width:100%;font:inherit;font-size:17px;font-weight:700;color:var(--c2);background:#fff;border:2px solid var(--c2);border-radius:10px;padding:12px;cursor:pointer}"+
+    ".mm-s{padding:14px 14px 6px}.mm-s h2{margin:0;font-size:25px;font-weight:800;color:var(--c2);letter-spacing:.01em}"+
+    ".mm-nota{color:#6b645a;font-size:14px;margin-top:2px}"+
+    ".mm-foto{display:flex;margin:10px -3px 2px}.mm-foto img{flex:1;min-width:0;width:10%;max-height:190px;object-fit:cover;border-radius:8px;margin:0 3px}"+
+    ".mm-cols{display:flex;justify-content:flex-end;margin-top:6px;color:var(--c2);font-size:13px;font-weight:700;font-style:italic}.mm-cols span{width:66px;text-align:right}"+
+    ".mm-v{padding:8px 0}"+
+    ".mm-r{display:flex;align-items:baseline}.mm-r b{font-weight:700;font-size:17px}"+
+    ".mm-pt{flex:1;min-width:14px;border-bottom:2px dotted #cfc8bc;margin:0 6px;position:relative;top:-4px}"+
+    ".mm-d{display:block;color:#6b645a;font-size:14px;max-width:78%}"+
+    ".mm-tag{flex:none;font-size:11px;font-weight:700;background:#f3efe7;color:#6b645a;border-radius:10px;padding:1px 8px;margin-left:6px;white-space:nowrap}"+
+    ".mm-tag.es{background:#fde5e2;color:#b3202a}"+
+    ".mm-vp{flex:none;text-align:right;font-weight:700;color:var(--c2);font-variant-numeric:tabular-nums}.mm-vp .mm-p{display:inline-block;width:66px;white-space:nowrap}"+
+    ".mm-vp .mm-p1{white-space:nowrap}.mm-vp .mm-t{display:block;max-width:150px;font-weight:600;font-size:14px;color:#6b645a}"+
+    ".mm-f{display:block;white-space:nowrap}.mm-f i{font-style:normal;font-weight:400;color:#6b645a;margin-right:8px}"+
+    ".mm-v.es .mm-r b,.mm-v.es .mm-d,.mm-v.es .mm-vp{color:#aaa39a;text-decoration:line-through}"+
+    ".mm-piede{background:var(--c2);color:#fff;padding:16px 14px;margin-top:18px;font-size:14px}.mm-piede p{margin:0 0 8px}.mm-piede p:last-child{margin:0}.mm-piede p.f{font-size:19px;font-weight:800;color:var(--c1)}"+
+    ".mm-cred{text-align:center;color:#a39c92;font-size:12px;padding:12px}"+
+    ".mm-nd{text-align:center;padding:70px 20px;color:#6b645a}.mm-nd b{display:block;font-size:20px;color:#2a2622;margin-bottom:6px}.mm-nd .ic{font-size:44px;margin-bottom:10px}";
+  function vars(m){var lo=(m&&m.locale)||{};return "--c1:"+colore(lo.c1,"#ffdd1a")+";--c2:"+colore(lo.c2,"#b3202a");}
+  function testa(m,l,conLingue){var lo=(m&&m.locale)||{},ls=lingue(m);
+    return '<div class="mm-top">'+(lo.logo?'<img class="mm-logo" src="'+e(lo.logo)+'" alt="">':'')+
+      '<div class="mm-nome"><b>'+e(lo.nome||"Menu")+'</b>'+(tx(lo.sotto,l)?'<span>'+e(tx(lo.sotto,l))+'</span>':'')+'</div>'+
+      (conLingue&&ls.length>1?'<div class="mm-lang">'+ls.map(function(x){return '<button type="button" data-mml="'+x+'"'+(x===l?' class="on"':'')+'>'+x.toUpperCase()+'</button>';}).join("")+'</div>':'')+'</div>';}
+  function voce(v,s,l){
+    var nc=(s.cols||[]).length,pr=v.p||[],d="",i;
+    if(nc){for(i=0;i<nc;i++)d+='<span class="mm-p">'+e(prezzo(tx(pr[i]&&pr[i].v,l)))+'</span>';}
+    else{
+      var con=pr.filter(function(x){return x&&String(tx(x.v,l)).trim();});
+      if(con.length===1&&!tx(con[0].l,l)){var pz=prezzo(tx(con[0].v,l));d=/^€/.test(pz)?'<span class="mm-p1">'+e(pz)+'</span>':'<span class="mm-t">'+e(pz)+'</span>';}
+      else d=con.map(function(x){return '<span class="mm-f"><i>'+e(tx(x.l,l))+'</i>'+e(prezzo(tx(x.v,l)))+'</span>';}).join("");
+    }
+    return '<div class="mm-v'+(v.esaur?' es':'')+'"><div class="mm-r"><b>'+e(tx(v.n,l))+'</b>'+
+      (tx(v.tag,l)?'<span class="mm-tag">'+e(tx(v.tag,l))+'</span>':'')+(v.esaur?'<span class="mm-tag es">'+T[l].esaur+'</span>':'')+
+      '<i class="mm-pt"></i><div class="mm-vp">'+d+'</div></div>'+(tx(v.d,l)?'<span class="mm-d">'+e(tx(v.d,l))+'</span>':'')+'</div>';
+  }
+  function visibili(m){return ((m&&m.sezioni)||[]).filter(function(s){return s.on!==false;});}
+  function haMsg(s,l){var g=s.msg;return !!(g&&(tx(g.t,l)||tx(g.d,l)||g.foto));}
+  function settore(s,l,titolo){
+    var voci=(s.voci||[]).filter(function(v){return v.on!==false;}),g=s.msg||{};
+    return '<section class="mm-s" data-mms="'+e(s.id)+'">'+(titolo?'<h2>'+e(tx(s.t,l))+'</h2>':'')+(tx(s.nota,l)?'<div class="mm-nota">'+e(tx(s.nota,l))+'</div>':'')+
+      ((s.foto||[]).length?'<div class="mm-foto">'+s.foto.map(function(f){return '<img src="'+e(f)+'" alt="">';}).join("")+'</div>':'')+
+      ((s.cols||[]).length&&voci.length?'<div class="mm-cols">'+s.cols.map(function(c){return '<span>'+e(tx(c,l))+'</span>';}).join("")+'</div>':'')+
+      voci.map(function(v){return voce(v,s,l);}).join("")+
+      (haMsg(s,l)?'<div class="mm-msg">'+(g.foto?'<img src="'+e(g.foto)+'" alt="">':'')+(tx(g.t,l)||tx(g.d,l)?'<div>'+(tx(g.t,l)?'<b>'+e(tx(g.t,l))+'</b>':'')+(tx(g.d,l)?'<span>'+e(tx(g.d,l))+'</span>':'')+'</div>':'')+'</div>':'')+
+      '</section>';
+  }
+  /** il menu come HTML (senza lo stile: quello è MM.CSS). Si vede un settore alla volta: scendendo non si passa da un settore all'altro.
+      pg = settore da mostrare (se manca, il primo); aperto = elenco dei settori aperto sotto la fascia. Niente copertina: il QR apre subito sul primo settore. */
+  function html(m,l,pg,aperto){
+    if(!T[l])l="it";
+    if(!m||!m.sezioni)return '<div class="mm" style="'+vars(m)+'"><div class="mm-nd"><div class="ic">🍽</div><b>'+T.it.prep+'</b>'+T.en.prep+'</div></div>';
+    if(scaduto(m))return '<div class="mm" style="'+vars(m)+'">'+testa(m,l,false)+'<div class="mm-nd"><div class="ic">⏳</div><b>'+T.it.nd+'</b>'+T.en.nd+'</div></div>';
+    var sez=visibili(m),h='<div class="mm" style="'+vars(m)+'">'+testa(m,l,true),k=0,i,n=sez.length;
+    for(i=0;i<n;i++)if(sez[i].id===pg)k=i;
+    if(n===1)h+=settore(sez[0],l,true);
+    else if(n){
+      var dopo=sez[(k+1)%n];
+      h+='<div class="mm-nav">'+sez.map(function(s,j){return '<button type="button" data-mmgo="'+e(s.id)+'"'+(j===k?' class="on"':'')+'>'+e(tx(s.t,l))+'</button>';}).join("")+'</div>'+
+        settore(sez[k],l,true)+'<div class="mm-av"><button type="button" data-mmgo="'+e(dopo.id)+'">'+T[l].avanti+': '+e(tx(dopo.t,l))+' →</button></div>';
+    }
+    var pd=(m.piede||[]).filter(function(p){return tx(p.t,l);});
+    if(pd.length)h+='<div class="mm-piede">'+pd.map(function(p){return '<p'+(p.forte?' class="f"':'')+'>'+e(tx(p.t,l))+'</p>';}).join("")+'</div>';
+    return h+'<div class="mm-cred">MenuMag · menu digitale</div></div>';
+  }
+  /** mette il menu dentro un elemento e fa funzionare i tasti delle lingue e dei settori.
+      Nella pagina pubblica (senza el._scroll) il settore aperto sta nell'indirizzo (#id): così il tasto Indietro del telefono torna al settore di prima. */
+  function monta(el,m,l){
+    var pub=!el._scroll;
+    function daHash(){try{return decodeURIComponent(String(location.hash||"").slice(1));}catch(x){return "";}}
+    function disegna(su){el.innerHTML=html(el._mm,el._l,el._pg,el._ap);if(su){if(el._scroll)el._scroll.scrollTop=0;else window.scrollTo(0,0);}}
+    el._mm=m;el._l=l||el._l||linguaIniziale(m);el._ap=false;
+    if(pub)el._pg=daHash();else if(el._pg==null)el._pg="";
+    disegna(false);
+    if(el._mmOn)return;el._mmOn=true;
+    if(pub)window.addEventListener("hashchange",function(){el._pg=daHash();el._ap=false;disegna(true);});
+    el.addEventListener("click",function(ev){
+      var b=ev.target;while(b&&b!==el&&!(b.getAttribute&&(b.getAttribute("data-mml")||b.getAttribute("data-mmel")||b.getAttribute("data-mmgo")!=null)))b=b.parentNode;
+      if(!b||b===el)return;
+      if(b.getAttribute("data-mml")){el._l=b.getAttribute("data-mml");try{localStorage.setItem("menumag_lingua",el._l);}catch(x){}disegna(false);return;}
+      if(b.getAttribute("data-mmel")){el._ap=!el._ap;disegna(false);return;}
+      var id=b.getAttribute("data-mmgo");el._ap=false;
+      if(!el._scroll&&daHash()!==id)location.hash=id;else{el._pg=id;disegna(true);}
+    });
+  }
+  return {CSS:CSS,html:html,monta:monta,tx:tx,prezzo:prezzo,scaduto:scaduto,linguaIniziale:linguaIniziale,oggi:oggi};
+})();
+/* ==FINE COMUNE== */
+</script>
+<script>
+/* MenuMag – pagina del menu (quella che si apre dal QR). MAG ASSISTANCE di GALANO MASSIMO.
+   Legge menu.json, che sta nella stessa cartella e viene riscritto dall'app a ogni «Pubblica».
+   Dentro menu.json c'è "scad" (ultimo giorno di licenza): dal giorno dopo il menu non si mostra più.
+   Solo sul PC di prova (localhost, o file aperto dal disco): se l'app di PROVA ha pubblicato, il menu si prende dalla memoria del browser. */
+(function(){
+  var el=document.getElementById("m"),st=document.createElement("style");st.textContent=MM.CSS;document.head.appendChild(st);
+  var PROVA=location.protocol==="file:"||/^(localhost|127\.0\.0\.1)$/.test(location.hostname),K_PROVA="menumag_prova_menu",K_ULT="menumag_ultimo";
+  function lingua(m){var l="";try{l=localStorage.getItem("menumag_lingua")||"";}catch(x){}
+    return l&&(m.lingue||["it"]).indexOf(l)>=0?l:MM.linguaIniziale(m);}
+  function mostra(m){
+    if(!m||!m.sezioni){el.innerHTML=MM.html(null,"it");return;}
+    document.title=((m.locale&&m.locale.nome)||"Menu")+" – Menu";
+    MM.monta(el,m,lingua(m));
+  }
+  function daMemoria(k){try{var t=localStorage.getItem(k);return t?JSON.parse(t):null;}catch(x){return null;}}
+  function carica(){
+    var p=PROVA?daMemoria(K_PROVA):null;
+    if(p){mostra(p);return;}
+    var x=new XMLHttpRequest();
+    x.open("GET","menu.json?t="+Date.now(),true);
+    x.onload=function(){var m=null;if(x.status>=200&&x.status<300){try{m=JSON.parse(x.responseText);}catch(e){}}
+      if(m){try{localStorage.setItem(K_ULT,x.responseText);}catch(e){}mostra(m);}else mostra(daMemoria(K_ULT));};
+    x.onerror=function(){mostra(daMemoria(K_ULT));};     /* senza rete: l'ultimo menu visto su questo telefono (la scadenza vale lo stesso) */
+    x.send();
+  }
+  carica();
+  if(PROVA)window.addEventListener("storage",function(ev){if(ev.key===K_PROVA)carica();});
+})();
+</script>
+</body>
+</html>
