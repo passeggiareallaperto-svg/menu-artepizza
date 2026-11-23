@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="menumag-pagina" content="1.0">
+<meta name="menumag-pagina" content="1.1">
 <meta name="robots" content="noindex">
 <title>Menu</title>
 <style>
@@ -259,6 +259,19 @@ var MM=(function(){
     document.title=((m.locale&&m.locale.nome)||"Menu")+" – Menu";
     MM.monta(el,m,lingua(m));
   }
+  /* Contatore delle aperture (pagina 1.1, 23/11/2026): serve solo a sapere se il QR viene usato.
+     Una volta per scheda del browser manda un «+1» a un servizio gratuito (abacus.jasoncameron.dev), senza cookie e senza dati della persona:
+     conta il giorno (gAAAAMMGG) e il totale, sotto il nome dell'archivio del locale (es. menumag-menu-artepizza).
+     Mai nella prova sul PC; se il servizio non risponde il menu funziona lo stesso. Con ?noconta nell'indirizzo non conta (per le prove di Massimo). */
+  var BEACON=[];
+  function conta(){
+    if(PROVA||/[?&]noconta\b/.test(location.search))return;
+    try{if(sessionStorage.getItem("menumag_contato"))return;sessionStorage.setItem("menumag_contato","1");}catch(x){}
+    var loc=(location.pathname.split("/")[1]||location.hostname).replace(/[^A-Za-z0-9_.-]/g,"-").slice(0,40),d=new Date();
+    function due(n){return (n<10?"0":"")+n;}
+    var base="https://abacus.jasoncameron.dev/hit/menumag-"+loc+"/";
+    ["g"+d.getFullYear()+due(d.getMonth()+1)+due(d.getDate()),"totale"].forEach(function(k){var i=new Image();BEACON.push(i);i.src=base+k;});
+  }
   function daMemoria(k){try{var t=localStorage.getItem(k);return t?JSON.parse(t):null;}catch(x){return null;}}
   function carica(){
     var p=PROVA?daMemoria(K_PROVA):null;
@@ -266,7 +279,7 @@ var MM=(function(){
     var x=new XMLHttpRequest();
     x.open("GET","menu.json?t="+Date.now(),true);
     x.onload=function(){var m=null;if(x.status>=200&&x.status<300){try{m=JSON.parse(x.responseText);}catch(e){}}
-      if(m){try{localStorage.setItem(K_ULT,x.responseText);}catch(e){}mostra(m);}else mostra(daMemoria(K_ULT));};
+      if(m){try{localStorage.setItem(K_ULT,x.responseText);}catch(e){}mostra(m);conta();}else mostra(daMemoria(K_ULT));};
     x.onerror=function(){mostra(daMemoria(K_ULT));};     /* senza rete: l'ultimo menu visto su questo telefono (la scadenza vale lo stesso) */
     x.send();
   }
